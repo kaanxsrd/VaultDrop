@@ -1,0 +1,60 @@
+# Publishes the `vaultdrop` CLI (./cli) to npm when a tag like `cli-v0.2.0` is pushed.
+# Uses npm Trusted Publishing (OIDC): no npm token is stored in GitHub. Configure the trusted
+# publisher on npmjs.com first — see docs/publishing-cli.md.
+name: Publish CLI
+
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing + provenance
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: "1.4.2" }
+      - run: bun install --frozen-lockfile
+      # Includes the CLI unit tests and the CLI <-> web crypto interoperability tests.
+      - run: bun run test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1.
+      - run: npm install -g npm@latest
+
+      - name: Check tag, version and repository field
+        working-directory: cli
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "cli-v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match cli/package.json version $VERSION"; exit 1
+          fi
+          node -e "if (!require('./package.json').repository) { console.error('::error::Add a repository field to cli/package.json (required for provenance)'); process.exit(1) }"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Smoke-test the packed tarball
+        working-directory: cli
+        run: |
+          npm pack
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE/cli/vaultdrop-$VERSION.tgz" --no-audit --no-fund
+          test "$(npx vaultdrop --version)" = "$VERSION"
+          npx vaultdrop --help > /dev/null
+
+      - name: Publish to npm (with provenance)
+        working-directory: cli
+        run: npm publish --provenance --access public

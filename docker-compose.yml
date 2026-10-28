@@ -1,0 +1,68 @@
+# Local dependencies:            docker compose up -d postgres redis
+# Full stack (production build): docker compose --profile app up -d --build
+name: vaultdrop
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vaultdrop
+      POSTGRES_PASSWORD: vaultdrop # local development only
+      POSTGRES_DB: vaultdrop
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vaultdrop -d vaultdrop"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--maxmemory",
+        "128mb",
+        "--maxmemory-policy",
+        "volatile-ttl",
+      ]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    profiles: [app]
+    build: { context: ., target: migrate }
+    environment:
+      DATABASE_URL: postgres://vaultdrop:vaultdrop@postgres:5432/vaultdrop
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  app:
+    profiles: [app]
+    build: { context: ., target: runtime }
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://vaultdrop:vaultdrop@postgres:5432/vaultdrop
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+volumes:
+  pgdata:

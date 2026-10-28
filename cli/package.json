@@ -1,0 +1,56 @@
+{
+  "name": "vaultdrop",
+  "version": "1.0.0",
+  "description": "Share passwords and API keys from the terminal through end-to-end encrypted links that self-destruct after one read.",
+  "keywords": [
+    "secret",
+    "password",
+    "share",
+    "one-time",
+    "self-destruct",
+    "encryption",
+    "end-to-end",
+    "aes-gcm",
+    "cli",
+    "vaultdrop"
+  ],
+  "homepage": "https://vaultdrop.vante.app/docs#cli",
+  "bugs": {
+    "email": "contact@vante.app"
+  },
+  "license": "MIT",
+  "author": "Vante <contact@vante.app>",
+  "type": "module",
+  "bin": {
+    "vaultdrop": "bin.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./vaultdrop.d.mts",
+      "default": "./vaultdrop.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin.mjs",
+    "vaultdrop.mjs",
+    "vaultdrop.d.mts",
+    "README.md",
+    "assets",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaanxsrd/VaultDrop.git",
+    "directory": "cli"
+  }
+}
