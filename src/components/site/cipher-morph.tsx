@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 const SAMPLES = [
   "DATABASE_URL=postgres://admin:S3cr3t@db.internal/prod",
-  "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCY",
+  "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCY", // gitleaks:allow (fake demo value)
   "Wi-Fi: Lantern-Guest · orchid-lantern-42",
   "Recovery codes: 7F3K-92QX · LM4P-0ZR8 · Q1VD-66TB",
 ];

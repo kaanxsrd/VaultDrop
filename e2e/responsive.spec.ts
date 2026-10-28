@@ -63,6 +63,10 @@ for (const path of [
   test(`no serious accessibility violations on ${path}`, async ({ page }) => {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
+    // Audit the settled page: mid-fade scroll reveals would otherwise fail color-contrast at random.
+    await page.addStyleTag({
+      content: "[data-reveal]{opacity:1!important;transform:none!important}",
+    });
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
       .analyze();

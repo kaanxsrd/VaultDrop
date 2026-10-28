@@ -494,7 +494,7 @@ export async function purgeTerminalMetadata(
     .where(
       and(
         sql`${secrets.state} <> 'active'`,
-        sql`((${secrets.ownerUserId} IS NULL AND ${terminalAt} < ${anonCutoff}) OR (${secrets.ownerUserId} IS NOT NULL AND ${terminalAt} < ${ownedCutoff}))`,
+        sql`((${secrets.ownerUserId} IS NULL AND ${terminalAt} < ${anonCutoff.toISOString()}) OR (${secrets.ownerUserId} IS NOT NULL AND ${terminalAt} < ${ownedCutoff.toISOString()}))`,
       ),
     )
     .returning({ id: secrets.id });

@@ -103,7 +103,7 @@ export async function secretStats(
     : and(eq(secrets.ownerUserId, scope.userId), isNull(secrets.organizationId));
   const rows = await db
     .select({
-      state: sql<string>`CASE WHEN ${secrets.state} = 'active' AND ${secrets.expiresAt} <= ${now} THEN 'expired' ELSE ${secrets.state}::text END`,
+      state: sql<string>`CASE WHEN ${secrets.state} = 'active' AND ${secrets.expiresAt} <= ${now.toISOString()} THEN 'expired' ELSE ${secrets.state}::text END`,
       count: sql<number>`count(*)::int`,
     })
     .from(secrets)

@@ -4,7 +4,7 @@ import { closeDb } from "@/server/db/client";
 import { call } from "../support/http";
 
 // Must be set before the config is first read.
-const CRON_SECRET = "test-cron-secret-0123456789abcdefghij";
+const CRON_SECRET = "test-cron-secret-0123456789abcdefghij"; // gitleaks:allow (test-only value)
 process.env.CRON_SECRET = CRON_SECRET;
 
 afterAll(async () => {

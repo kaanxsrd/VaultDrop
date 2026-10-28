@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { newId } from "@/server/crypto";
 import { getDb } from "@/server/db/client";
@@ -117,7 +117,7 @@ export async function failedJobRunsSince(since: Date) {
   return db
     .select()
     .from(jobRuns)
-    .where(and(eq(jobRuns.status, "failed"), sql`${jobRuns.startedAt} >= ${since}`));
+    .where(and(eq(jobRuns.status, "failed"), gte(jobRuns.startedAt, since)));
 }
 
 const globalForJobs = globalThis as unknown as { __vaultdropScheduler?: NodeJS.Timeout[] };
