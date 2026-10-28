@@ -63,7 +63,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: "${{ env.BUN_VERSION }}" }
       # Playwright's test runner does not support the Bun runtime; the app under test still runs on Bun.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 24 }
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
