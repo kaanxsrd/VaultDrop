@@ -25,6 +25,8 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
+# Pick up Alpine security fixes released after the base image was built.
+RUN apk upgrade --no-cache
 # The oven/bun image ships an unprivileged "bun" user.
 COPY --from=build --chown=bun:bun /app/.next/standalone ./
 COPY --from=build --chown=bun:bun /app/.next/static ./.next/static

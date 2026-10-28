@@ -88,10 +88,10 @@ export function CipherMorph() {
 
       <div className="relative mt-4 space-y-4 font-mono text-[13px] leading-relaxed">
         <div>
-          <div className="mb-1 text-[11px] tracking-wider text-white/40 uppercase">You type</div>
+          <div className="mb-1 text-[11px] tracking-wider text-white/60 uppercase">You type</div>
           <div className="min-h-[2lh] break-all text-[#a6e3a1]">{plain}</div>
         </div>
-        <div className="flex items-center gap-2 text-white/35">
+        <div className="flex items-center gap-2 text-white/60">
           <span className="h-px flex-1 bg-linear-to-r from-transparent to-white/15" />
           <LockKeyhole
             className={`size-4 transition-colors duration-500 ${phase === "plain" ? "" : "text-[#45d1a5]"}`}
@@ -101,7 +101,7 @@ export function CipherMorph() {
           <span className="h-px flex-1 bg-linear-to-l from-transparent to-white/15" />
         </div>
         <div>
-          <div className="mb-1 text-[11px] tracking-wider text-white/40 uppercase">
+          <div className="mb-1 text-[11px] tracking-wider text-white/60 uppercase">
             VaultDrop stores
           </div>
           <div
