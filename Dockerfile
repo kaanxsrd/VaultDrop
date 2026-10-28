@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build on Bun: dependencies → build → minimal non-root runtime (Next.js standalone output).
 
-FROM oven/bun:1.4.2-alpine AS base
+FROM oven/bun:1.4.4-alpine AS base
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN bun run build
 FROM build AS migrate
 CMD ["bun", "run", "db:migrate"]
 
-FROM oven/bun:1.4.2-alpine AS runtime
+FROM oven/bun:1.4.4-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
