@@ -63,7 +63,7 @@
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/bun": "latest",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.5",
     "@types/nodemailer": "^8.0.2",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
