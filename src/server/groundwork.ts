@@ -2,7 +2,7 @@ import "server-only";
 import { createGroundwork, type Logger } from "@vantedev/groundwork";
 import { redisStore } from "@vantedev/groundwork/rate-limit";
 import { getDb } from "@/server/db/client";
-import { gwRateLimits } from "@/server/db/schema";
+import { gwIdempotencyKeys, gwRateLimits } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { logger } from "@/server/log";
 
@@ -20,7 +20,7 @@ async function create() {
   const store = url ? redisStore({ client: await redisClient(url) }) : undefined;
   return createGroundwork({
     db: await getDb(),
-    tables: { rateLimits: gwRateLimits },
+    tables: { rateLimits: gwRateLimits, idempotencyKeys: gwIdempotencyKeys },
     // groundwork derives its own keys from APP_SECRET (HKDF), so no new setting is needed.
     secret: env().APP_SECRET,
     logger: groundworkLogger,
