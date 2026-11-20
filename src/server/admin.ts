@@ -5,8 +5,8 @@ import { newId } from "@/server/crypto";
 import { getDb } from "@/server/db/client";
 import {
   auditEvents,
+  gwRateLimits,
   organization,
-  rateLimits,
   secrets,
   session,
   subscriptions,
@@ -118,18 +118,21 @@ export async function recentAudit(limit = 50) {
   return db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(limit);
 }
 
-/** Hot rate-limit buckets in the current window (keys are pseudonymous; only bucket names are shown). */
+/**
+ * Hot rate-limit rules in the current window. Subjects are HMACs; only rule names are shown.
+ * Empty when counters live in Redis.
+ */
 export async function rateLimitPressure() {
   const db = await getDb();
   return db
     .select({
-      bucket: sql<string>`split_part(${rateLimits.key}, ':', 1) || ':' || split_part(${rateLimits.key}, ':', 2) || ':' || split_part(${rateLimits.key}, ':', 3)`,
+      bucket: gwRateLimits.rule,
       clients: sql<number>`count(*)::int`,
-      maxCount: sql<number>`max(${rateLimits.count})::int`,
+      maxCount: sql<number>`ceil(max(${gwRateLimits.used}))::int`,
     })
-    .from(rateLimits)
-    .where(sql`${rateLimits.expiresAt} > now()`)
-    .groupBy(sql`1`)
+    .from(gwRateLimits)
+    .where(sql`${gwRateLimits.expiresAt} > now()`)
+    .groupBy(gwRateLimits.rule)
     .orderBy(sql`3 desc`)
     .limit(20);
 }

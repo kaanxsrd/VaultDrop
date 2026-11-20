@@ -38,7 +38,8 @@ Browser / CLI ──HTTPS──▶ reverse proxy ──▶ Next.js (App Router, 
 
 - `secrets` — metadata and state; `secret_payloads` — ciphertext only, 1:1, `ON DELETE CASCADE`. Payload rows are deleted whenever a secret leaves `active`.
 - Better Auth tables: `users`, `sessions`, `accounts`, `verifications`, `two_factors`, `passkeys`, `organizations`, `members`, `invitations`.
-- `api_keys` (SHA-256 token hashes), `idempotency_keys`, `rate_limits`, `usage_counters`, `subscriptions`, `webhook_endpoints`, `webhook_deliveries`, `audit_events`, `notifications`, `user_settings`, `job_runs`.
+- `api_keys` (SHA-256 token hashes), `usage_counters`, `subscriptions`, `webhook_endpoints`, `webhook_deliveries`, `audit_events`, `notifications`, `user_settings`.
+- [groundwork](https://github.com/kaanxsrd/groundwork)'s tables: `gw_rate_limits`, `gw_idempotency_keys`, `gw_jobs` and `gw_job_schedules`. The older `rate_limits`, `idempotency_keys` and `job_runs` are no longer written and can be dropped.
 - Deleting a user cascades to their secrets, payloads, keys, webhooks, sessions and settings; audit events keep `user_id = NULL`.
 
 ## Secret state machine
@@ -62,15 +63,16 @@ Terminal states never transition again: every write is `UPDATE … WHERE state =
 | `expire-secrets`     | 60 s     | `active` → `expired` for overdue rows, delete payloads (SKIP LOCKED batches) |
 | `deliver-webhooks`   | 30 s     | Lease due deliveries, sign and POST, back off on failure                     |
 | `purge-metadata`     | 1 h      | Delete terminal secret metadata after retention (24 h anonymous, 30 d owned) |
-| `purge-housekeeping` | 1 h      | Expired rate-limit rows, idempotency keys > 24 h, job runs > 7 d             |
+| `purge-housekeeping` | 1 h      | Finished job runs > 7 d                                                      |
+| `groundwork.*`       | 1 h      | groundwork's own: expired rate-limit counters and idempotency keys           |
 
-All jobs are idempotent and safe to run concurrently on multiple instances. Each attempt is recorded in `job_runs` with up to 3 retries and exponential backoff; `/api/health`, `/status` and `/admin` report staleness. Expiry correctness does **not** depend on the jobs — it is enforced on every read.
+The jobs are groundwork schedules: each runs once per interval across all instances, with up to 3 attempts and exponential backoff, and each run is recorded in `gw_jobs`. All jobs are idempotent, so a run retried after a crash is safe; `/api/health`, `/status` and `/admin` report staleness. Expiry correctness does **not** depend on the jobs — it is enforced on every read.
 
 ## Architectural decisions
 
 1. **Next.js route handlers as the backend.** One deployable; no separate API server. Trade-off: no socket-level client IP, so rate limiting relies on a trusted reverse proxy (`TRUST_PROXY`).
 2. **Drizzle with dual drivers (postgres-js / PGlite).** PGlite (real Postgres compiled to WASM) gives a zero-dependency dev setup and real-SQL tests. Trade-off: PGlite is single-connection, so true parallel concurrency is verified only by CI against real PostgreSQL. Production refuses to start on PGlite unless explicitly overridden for local smoke tests.
-3. **Postgres-backed rate limiting with optional Redis.** Correct across instances with no extra infrastructure; Redis offloads hot counters. Correctness of the one-time guarantee never depends on Redis.
+3. **Postgres-backed rate limiting with optional Redis** (groundwork). Correct across instances with no extra infrastructure; Redis offloads hot counters. Correctness of the one-time guarantee never depends on Redis.
 4. **Passphrase proof instead of server-side passphrase check.** See `encryption.md`; gives "wrong passphrase doesn't consume" without the server learning the passphrase.
 5. **Derived receipt tokens.** HMAC of the secret id, so idempotent replays can return the same token without storing it.
 6. **Transactional outbox for events.** Webhook deliveries and notifications are inserted in the same transaction as the state change.

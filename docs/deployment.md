@@ -77,7 +77,7 @@ Set `TRUST_PROXY=true` only when the proxy overwrites `X-Forwarded-For`. VaultDr
 
 ## Background jobs
 
-Default `JOBS_IN_PROCESS=true` runs the scheduler in each web instance (jobs are idempotent and lock-free). For serverless or many replicas set `JOBS_IN_PROCESS=false` and trigger `POST /api/internal/jobs` with `Authorization: Bearer $CRON_SECRET` every minute (`bun run jobs:run --loop`, a Kubernetes CronJob, or your platform's cron). Alert if `/api/health` reports a job as `healthy: false`.
+Default `JOBS_IN_PROCESS=true` runs a job worker in each web instance; with several instances, each job still runs once per interval. For serverless or many replicas set `JOBS_IN_PROCESS=false` and trigger `POST /api/internal/jobs` with `Authorization: Bearer $CRON_SECRET` every minute (`bun run jobs:run --loop`, a Kubernetes CronJob, or your platform's cron). Alert if `/api/health` reports a job as `healthy: false`.
 
 ## Monitoring & alerting
 

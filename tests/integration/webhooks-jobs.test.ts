@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PLANS } from "@/config/plans";
 import { closeDb, getDb } from "@/server/db/client";
 import {
-  jobRuns,
+  gwJobs,
   notifications,
   subscriptions,
   user,
@@ -162,22 +162,30 @@ describe("job runner", () => {
     expect(health.find((h) => h.job === "expire-secrets")?.healthy).toBe(true);
   });
 
-  it("retries failing jobs and records each failed attempt", async () => {
+  it("retries a failed run later and records the failure", async () => {
     const original = JOBS["purge-metadata"].run;
     let calls = 0;
     JOBS["purge-metadata"].run = async () => {
       calls++;
-      if (calls < 3) throw new Error("transient database error");
+      if (calls < 2) throw new Error("transient database error");
       return { purged: 0 };
     };
     try {
-      const result = await runJob("purge-metadata", { retryDelayMs: 1 });
-      expect(result.ok).toBe(true);
-      expect(calls).toBe(3);
+      const failed = await runJob("purge-metadata");
+      expect(failed).toMatchObject({ ok: false, attempts: 1 });
+      expect(failed.error).toContain("transient database error");
+      const health = await jobHealth();
+      expect(health.find((h) => h.job === "purge-metadata")?.lastFailureAt).not.toBeNull();
+
+      // The retry waits out its backoff; make it due now.
       const db = await getDb();
-      const runs = await db.select().from(jobRuns).where(eq(jobRuns.job, "purge-metadata"));
-      expect(runs.filter((r) => r.status === "failed")).toHaveLength(2);
-      expect(runs.filter((r) => r.status === "succeeded")).toHaveLength(1);
+      await db
+        .update(gwJobs)
+        .set({ runAt: new Date() })
+        .where(eq(gwJobs.type, "schedule:purge-metadata"));
+      const retried = await runJob("purge-metadata");
+      expect(retried).toMatchObject({ ok: true, attempts: 2 });
+      expect(calls).toBe(2);
     } finally {
       JOBS["purge-metadata"].run = original;
     }

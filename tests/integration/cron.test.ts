@@ -27,6 +27,8 @@ describe("/api/internal/jobs (Vercel Cron / external schedulers)", () => {
     expect(Object.keys(res.json.results).sort()).toEqual([
       "deliver-webhooks",
       "expire-secrets",
+      "groundwork.idempotency-cleanup",
+      "groundwork.rate-limit-cleanup",
       "purge-housekeeping",
       "purge-metadata",
     ]);

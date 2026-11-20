@@ -10,6 +10,7 @@ import * as secretsRoute from "@/app/api/v1/secrets/route";
 import { PLANS } from "@/config/plans";
 import { deriveKeys, openEnvelope, sealSecret } from "@/lib/crypto/envelope";
 import { buildOpenApi } from "@/lib/openapi";
+import { rateLimitPressure } from "@/server/admin";
 import { createApiKey } from "@/server/apikeys";
 import { closeDb, getDb } from "@/server/db/client";
 import { subscriptions, user } from "@/server/db/schema";
@@ -174,6 +175,12 @@ describe("rate limiting", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     // A different client is unaffected.
     expect((await call(secretsRoute.POST, { body, ip: "198.51.100.78" })).status).toBe(201);
+    // The admin page sees the hot rule, never the client.
+    const hot = (await rateLimitPressure()).find(
+      (p) => p.bucket === "secret:create:anon:20per600s",
+    );
+    expect(hot?.maxCount).toBe(20);
+    expect(hot?.clients).toBeGreaterThanOrEqual(2);
   });
 
   it("limits redemption attempts per secret regardless of client IP", async () => {

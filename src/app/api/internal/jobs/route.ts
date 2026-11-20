@@ -2,10 +2,10 @@ import { safeEqual } from "@/server/crypto";
 import { env } from "@/server/env";
 import { AppError } from "@/server/errors";
 import { json, type RouteContext, route } from "@/server/http/route";
-import { JOBS, type JobName, runJob } from "@/server/jobs/runner";
+import { runJobs } from "@/server/jobs/runner";
 
 export const dynamic = "force-dynamic";
-// All jobs run sequentially in one invocation; give them room on serverless platforms.
+// All jobs run in one invocation; give them room on serverless platforms.
 export const maxDuration = 60;
 
 /**
@@ -20,12 +20,7 @@ async function handle({ req }: RouteContext<Record<string, never>>) {
   if (!secret || !safeEqual(provided, secret))
     throw new AppError("unauthorized", "Invalid cron credentials.");
   const job = new URL(req.url).searchParams.get("job");
-  const names = job ? [job] : Object.keys(JOBS);
-  const results: Record<string, unknown> = {};
-  for (const name of names) {
-    if (!(name in JOBS)) throw new AppError("not_found", `Unknown job '${name}'.`);
-    results[name] = await runJob(name as JobName);
-  }
+  const results = await runJobs(job ? [job] : undefined);
   return json({ results });
 }
 
