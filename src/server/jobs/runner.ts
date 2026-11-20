@@ -1,78 +1,102 @@
 import "server-only";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import type { Duration } from "@vantedev/groundwork";
+import type { JobRecord, Jobs } from "@vantedev/groundwork/jobs";
 import { after } from "next/server";
-import { newId } from "@/server/crypto";
-import { getDb } from "@/server/db/client";
-import { jobRuns } from "@/server/db/schema";
 import { env } from "@/server/env";
-import { purgeIdempotencyKeys } from "@/server/idempotency";
+import { AppError } from "@/server/errors";
+import { gw } from "@/server/groundwork";
 import { errorInfo, logger } from "@/server/log";
-import { purgeExpiredRateLimits } from "@/server/ratelimit";
 import { expireDueSecrets, purgeTerminalMetadata } from "@/server/secrets/service";
 import { deliverDueWebhooks } from "@/server/webhooks";
 
 /**
- * Background jobs. Every job is idempotent and safe to run concurrently on several instances
- * (conditional updates / SKIP LOCKED), so the scheduler needs no distributed lock for correctness.
+ * Background jobs, run as groundwork schedules: each runs once per interval across every
+ * instance, with up to 3 attempts (backoff from 5 s) and a history in gw_jobs. Every job is
+ * idempotent, so a run retried after a crash is safe. groundwork adds its own hourly
+ * schedules that delete expired rate-limit counters and idempotency keys.
  */
 export const JOBS = {
-  "expire-secrets": { everySeconds: 60, run: async () => ({ ...(await expireDueSecrets()) }) },
-  "deliver-webhooks": { everySeconds: 30, run: async () => ({ ...(await deliverDueWebhooks()) }) },
+  "expire-secrets": { every: "60s", run: async () => ({ ...(await expireDueSecrets()) }) },
+  "deliver-webhooks": { every: "30s", run: async () => ({ ...(await deliverDueWebhooks()) }) },
   "purge-metadata": {
-    everySeconds: 3600,
+    every: "1h",
     run: async () => ({ ...(await purgeTerminalMetadata()) }),
   },
   "purge-housekeeping": {
-    everySeconds: 3600,
-    run: async () => ({
-      rateLimits: await purgeExpiredRateLimits(),
-      idempotencyKeys: await purgeIdempotencyKeys(),
-      jobRuns: await purgeJobRuns(),
-    }),
+    every: "1h",
+    run: async () => ({ jobs: await (await jobs()).prune({ completedOlderThan: "7d" }) }),
   },
-} satisfies Record<string, { everySeconds: number; run: () => Promise<Record<string, number>> }>;
+} satisfies Record<string, { every: Duration; run: () => Promise<Record<string, number>> }>;
 
-export type JobName = keyof typeof JOBS;
-const MAX_ATTEMPTS = 3;
+const SCHEDULE_TYPE = "schedule:";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const globalForJobs = globalThis as unknown as {
+  __vaultdropSchedules?: WeakSet<Jobs>;
+  __vaultdropWorker?: Promise<unknown>;
+};
 
-/** Runs a job with bounded retries and records each attempt in job_runs for monitoring. */
-export async function runJob(
-  name: JobName,
-  opts: { retryDelayMs?: number } = {},
-): Promise<{ ok: boolean; stats?: Record<string, number> }> {
-  const db = await getDb();
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const id = newId("job");
-    await db.insert(jobRuns).values({ id, job: name, status: "running", attempt });
-    try {
-      const stats = await JOBS[name].run();
-      await db
-        .update(jobRuns)
-        .set({ status: "succeeded", finishedAt: new Date(), stats })
-        .where(eq(jobRuns.id, id));
-      return { ok: true, stats };
-    } catch (error) {
-      const info = errorInfo(error);
-      await db
-        .update(jobRuns)
-        .set({ status: "failed", finishedAt: new Date(), error: `${info.name}: ${info.message}` })
-        .where(eq(jobRuns.id, id));
-      logger.error({ job: name, attempt, err: info }, "job attempt failed");
-      if (attempt < MAX_ATTEMPTS) await sleep((opts.retryDelayMs ?? 1000) * 2 ** (attempt - 1));
+/** groundwork's queue, with this app's schedules defined on it. */
+async function jobs(): Promise<Jobs> {
+  const queue = (await gw()).jobs;
+  globalForJobs.__vaultdropSchedules ??= new WeakSet();
+  const defined = globalForJobs.__vaultdropSchedules;
+  if (!defined.has(queue)) {
+    defined.add(queue);
+    for (const [name, job] of Object.entries(JOBS)) {
+      queue.schedule(name, { every: job.every }, () => job.run());
     }
   }
-  return { ok: false };
+  return queue;
 }
 
-async function purgeJobRuns(): Promise<number> {
-  const db = await getDb();
-  const rows = await db
-    .delete(jobRuns)
-    .where(lt(jobRuns.startedAt, new Date(Date.now() - 7 * 86_400_000)))
-    .returning({ id: jobRuns.id });
-  return rows.length;
+export interface JobResult {
+  ok: boolean;
+  attempts: number;
+  stats?: unknown;
+  error?: string;
+}
+
+function toResult(job: JobRecord | undefined): JobResult {
+  if (!job) return { ok: false, attempts: 0 };
+  if (job.status === "completed") return { ok: true, attempts: job.attempts, stats: job.result };
+  return job.lastError
+    ? { ok: false, attempts: job.attempts, error: job.lastError }
+    : { ok: false, attempts: job.attempts };
+}
+
+/** Every schedule: this app's jobs in order, then groundwork's. */
+async function schedules(queue: Jobs) {
+  const order: string[] = Object.keys(JOBS);
+  const rank = (name: string) => (order.includes(name) ? order.indexOf(name) : order.length);
+  const { schedules } = await queue.health();
+  return [...schedules].sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+}
+
+/**
+ * Runs the named jobs now (every job by default), along with anything else that is due, and
+ * reports each named job's latest run. A failed run is retried later with backoff.
+ */
+export async function runJobs(
+  names?: readonly string[],
+  options: { budgetMs?: number } = {},
+): Promise<Record<string, JobResult>> {
+  const queue = await jobs();
+  const run = names ?? (await schedules(queue)).map((s) => s.name);
+  for (const name of run) {
+    if (!(await queue.trigger(name))) throw new AppError("not_found", `Unknown job '${name}'.`);
+  }
+  await queue.runOnce({ budgetMs: options.budgetMs ?? 50_000 });
+  const results: Record<string, JobResult> = {};
+  for (const name of run) {
+    const [latest] = await queue.list({ type: `${SCHEDULE_TYPE}${name}`, limit: 1 });
+    results[name] = toResult(latest);
+  }
+  return results;
+}
+
+export async function runJob(name: string): Promise<JobResult> {
+  const results = await runJobs([name]);
+  return results[name] ?? { ok: false, attempts: 0 };
 }
 
 export interface JobHealth {
@@ -84,45 +108,31 @@ export interface JobHealth {
 
 /** A job is unhealthy if it has not succeeded within 3× its interval. */
 export async function jobHealth(): Promise<JobHealth[]> {
-  const db = await getDb();
-  const rows = await db
-    .select({
-      job: jobRuns.job,
-      lastSuccess: sql<Date | null>`max(case when ${jobRuns.status} = 'succeeded' then ${jobRuns.finishedAt} end)`,
-      lastFailure: sql<Date | null>`max(case when ${jobRuns.status} = 'failed' then ${jobRuns.finishedAt} end)`,
-    })
-    .from(jobRuns)
-    .groupBy(jobRuns.job);
-  const byName = new Map(rows.map((r) => [r.job, r]));
-  return (Object.keys(JOBS) as JobName[]).map((job) => {
-    const r = byName.get(job);
-    const lastSuccess = r?.lastSuccess ? new Date(r.lastSuccess) : null;
-    return {
-      job,
-      lastSuccessAt: lastSuccess?.toISOString() ?? null,
-      lastFailureAt: r?.lastFailure ? new Date(r.lastFailure).toISOString() : null,
-      healthy:
-        lastSuccess !== null && Date.now() - lastSuccess.getTime() < JOBS[job].everySeconds * 3000,
-    };
-  });
+  return (await schedules(await jobs())).map((s) => ({
+    job: s.name,
+    lastSuccessAt: s.lastSuccessAt?.toISOString() ?? null,
+    lastFailureAt: s.lastFailureAt?.toISOString() ?? null,
+    healthy: s.healthy,
+  }));
 }
 
+/** The latest runs, newest first. A retried run is one row; `attempt` counts its tries. */
 export async function recentJobRuns(limit = 50) {
-  const db = await getDb();
-  return db.select().from(jobRuns).orderBy(desc(jobRuns.startedAt)).limit(limit);
+  const queue = await jobs();
+  const runs = await queue.list({
+    type: (await schedules(queue)).map((s) => `${SCHEDULE_TYPE}${s.name}`),
+    limit,
+  });
+  return runs.map((run) => ({
+    id: run.id,
+    job: run.type.slice(SCHEDULE_TYPE.length),
+    status: run.status,
+    attempt: run.attempts,
+    startedAt: run.startedAt ?? run.createdAt,
+    error: run.lastError,
+  }));
 }
 
-export async function failedJobRunsSince(since: Date) {
-  const db = await getDb();
-  return db
-    .select()
-    .from(jobRuns)
-    .where(and(eq(jobRuns.status, "failed"), gte(jobRuns.startedAt, since)));
-}
-
-const globalForJobs = globalThis as unknown as { __vaultdropScheduler?: NodeJS.Timeout[] };
-
-/** In-process scheduler (default). For multiple instances you may instead call /api/internal/jobs from cron. */
 /**
  * Serverless deployments (JOBS_IN_PROCESS=false) have no scheduler loop, so after a request that may
  * have queued webhook deliveries, deliver them once the response has been sent. Deliveries are
@@ -139,23 +149,18 @@ export function deliverWebhooksAfterResponse(): void {
   });
 }
 
+/**
+ * In-process worker (default). It checks for due work every 5 seconds; with several instances,
+ * each job still runs once per interval. Deployments with JOBS_IN_PROCESS=false call
+ * /api/internal/jobs from cron instead.
+ */
 export function startScheduler(): void {
-  if (globalForJobs.__vaultdropScheduler) return;
-  const running = new Set<JobName>();
-  globalForJobs.__vaultdropScheduler = (Object.keys(JOBS) as JobName[]).map((name) => {
-    const tick = async () => {
-      if (running.has(name)) return; // bound concurrency: one run per job per process
-      running.add(name);
-      try {
-        await runJob(name);
-      } finally {
-        running.delete(name);
-      }
-    };
-    const timer = setInterval(() => void tick(), JOBS[name].everySeconds * 1000);
-    timer.unref();
-    setTimeout(() => void tick(), 5_000).unref();
-    return timer;
-  });
+  if (globalForJobs.__vaultdropWorker) return;
+  globalForJobs.__vaultdropWorker = jobs()
+    .then((queue) => queue.work({ concurrency: 4, pollInterval: "5s" }))
+    .catch((error: unknown) => {
+      logger.error({ err: errorInfo(error) }, "job worker stopped");
+      globalForJobs.__vaultdropWorker = undefined;
+    });
   logger.info({ jobs: Object.keys(JOBS) }, "in-process job scheduler started");
 }

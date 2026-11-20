@@ -76,11 +76,6 @@ export async function enforceRateLimit(
   return result;
 }
 
-/** Deletes expired counters; returns how many. */
-export async function purgeExpiredRateLimits(): Promise<number> {
-  return (await gw()).rateLimit.cleanup();
-}
-
 export const RULES = {
   createAnonymous: { name: "secret:create:anon", limit: 20, windowSeconds: 600 },
   createAuthenticated: { name: "secret:create:user", limit: 120, windowSeconds: 600 },

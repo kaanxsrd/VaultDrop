@@ -41,8 +41,3 @@ export async function withIdempotency<T extends Record<string, unknown>>(
   const stored = result.value as unknown as { status: number; body: T };
   return { ...stored, replayed: result.replayed };
 }
-
-/** Deletes expired keys; returns how many. */
-export async function purgeIdempotencyKeys(): Promise<number> {
-  return (await gw()).idempotency.cleanup();
-}

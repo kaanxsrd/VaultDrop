@@ -1,8 +1,8 @@
 import "server-only";
 import { createGroundwork, type Logger } from "@vantedev/groundwork";
 import { redisStore } from "@vantedev/groundwork/rate-limit";
-import { getDb } from "@/server/db/client";
-import { gwIdempotencyKeys, gwRateLimits } from "@/server/db/schema";
+import { type Database, getDb } from "@/server/db/client";
+import { gwIdempotencyKeys, gwJobSchedules, gwJobs, gwRateLimits } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { logger } from "@/server/log";
 
@@ -13,14 +13,19 @@ const groundworkLogger: Logger = {
   error: (message, context) => logger.error(context ?? {}, message),
 };
 
-async function create() {
+async function create(db: Database) {
   const url = env().REDIS_URL;
   // Counters live in Postgres, or in Redis when REDIS_URL is set. If the store fails, limits keep
   // holding per instance in memory until it's back.
   const store = url ? redisStore({ client: await redisClient(url) }) : undefined;
   return createGroundwork({
-    db: await getDb(),
-    tables: { rateLimits: gwRateLimits, idempotencyKeys: gwIdempotencyKeys },
+    db,
+    tables: {
+      rateLimits: gwRateLimits,
+      idempotencyKeys: gwIdempotencyKeys,
+      jobs: gwJobs,
+      jobSchedules: gwJobSchedules,
+    },
     // groundwork derives its own keys from APP_SECRET (HKDF), so no new setting is needed.
     secret: env().APP_SECRET,
     logger: groundworkLogger,
@@ -40,15 +45,21 @@ async function redisClient(url: string) {
 type Groundwork = Awaited<ReturnType<typeof create>>;
 
 const globalForGroundwork = globalThis as unknown as {
-  __vaultdropGroundwork?: Promise<Groundwork>;
+  __vaultdropGroundwork?: { db: Database; instance: Promise<Groundwork> };
 };
 
-/** The app's groundwork instance, created on first use like the database. */
-export function gw(): Promise<Groundwork> {
-  globalForGroundwork.__vaultdropGroundwork ??= create().catch((error: unknown) => {
+/** The app's groundwork instance, created on first use for the current database connection. */
+export async function gw(): Promise<Groundwork> {
+  const db = await getDb();
+  const cached = globalForGroundwork.__vaultdropGroundwork;
+  if (cached?.db === db) return cached.instance;
+  const instance = create(db).catch((error: unknown) => {
     // Let the next call try again instead of failing forever.
-    globalForGroundwork.__vaultdropGroundwork = undefined;
+    if (globalForGroundwork.__vaultdropGroundwork?.instance === instance) {
+      globalForGroundwork.__vaultdropGroundwork = undefined;
+    }
     throw error;
   });
-  return globalForGroundwork.__vaultdropGroundwork;
+  globalForGroundwork.__vaultdropGroundwork = { db, instance };
+  return instance;
 }

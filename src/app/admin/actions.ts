@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { PlanId } from "@/config/plans";
 import { setUserBanned, setUserPlan } from "@/server/admin";
 import { requireAdmin } from "@/server/auth/session";
-import { JOBS, type JobName, runJob } from "@/server/jobs/runner";
+import { runJob } from "@/server/jobs/runner";
 
 // Every action re-checks the admin role on the server; the UI hiding buttons is not a control.
 
@@ -31,6 +31,6 @@ export async function toggleBanAction(formData: FormData) {
 export async function runJobAction(formData: FormData) {
   await requireAdmin();
   const job = String(formData.get("job"));
-  if (job in JOBS) await runJob(job as JobName);
+  await runJob(job);
   revalidatePath("/admin");
 }
