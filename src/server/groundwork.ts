@@ -1,17 +1,10 @@
 import "server-only";
-import { createGroundwork, type Logger } from "@vantedev/groundwork";
+import { createGroundwork, pinoLogger } from "@vantedev/groundwork";
 import { redisStore } from "@vantedev/groundwork/rate-limit";
 import { type Database, getDb } from "@/server/db/client";
 import { gwIdempotencyKeys, gwJobSchedules, gwJobs, gwRateLimits } from "@/server/db/schema";
 import { env } from "@/server/env";
 import { logger } from "@/server/log";
-
-/** groundwork logs `(message, context)`; pino takes `(context, message)`. */
-const groundworkLogger: Logger = {
-  info: (message, context) => logger.info(context ?? {}, message),
-  warn: (message, context) => logger.warn(context ?? {}, message),
-  error: (message, context) => logger.error(context ?? {}, message),
-};
 
 async function create(db: Database) {
   const url = env().REDIS_URL;
@@ -28,7 +21,7 @@ async function create(db: Database) {
     },
     // groundwork derives its own keys from APP_SECRET (HKDF), so no new setting is needed.
     secret: env().APP_SECRET,
-    logger: groundworkLogger,
+    logger: pinoLogger(logger),
     ...(store ? { rateLimit: { store } } : {}),
   });
 }

@@ -1,5 +1,4 @@
 import "server-only";
-import type { RateLimitRule as GroundworkRule } from "@vantedev/groundwork/rate-limit";
 import { AppError } from "@/server/errors";
 import { gw } from "@/server/groundwork";
 
@@ -20,30 +19,17 @@ export interface RateLimitResult {
 /**
  * Fixed windows counted by groundwork in Postgres (or Redis), correct across instances. Subjects
  * are stored as HMACs, never as IPs or ids. A rule's limit may vary per caller (an API key's
- * plan), so each name, limit and window gets its own groundwork rule.
+ * plan), so the groundwork rule is defined per check, which does no I/O. The limit and window
+ * in its name keep different limits' counters apart.
  */
-const rules = new Map<string, Promise<GroundworkRule>>();
-
-function ruleFor({ name, limit, windowSeconds }: RateLimitRule): Promise<GroundworkRule> {
-  const id = `${name}:${limit}per${windowSeconds}s`;
-  let rule = rules.get(id);
-  if (!rule) {
-    rule = gw()
-      .then((g) => g.rateLimit.rule({ name: id, limit, window: `${windowSeconds}s` }))
-      .catch((error: unknown) => {
-        rules.delete(id);
-        throw error;
-      });
-    rules.set(id, rule);
-  }
-  return rule;
-}
-
 export async function checkRateLimit(
   rule: RateLimitRule,
   subject: string,
 ): Promise<RateLimitResult & { retryAfterMs: number }> {
-  const result = await (await ruleFor(rule)).check(subject);
+  const { name, limit, windowSeconds } = rule;
+  const result = await (await gw()).rateLimit
+    .rule({ name: `${name}:${limit}per${windowSeconds}s`, limit, window: `${windowSeconds}s` })
+    .check(subject);
   return {
     allowed: result.allowed,
     limit: result.limit,
