@@ -28,8 +28,6 @@ export const JOBS = {
   },
 } satisfies Record<string, { every: Duration; run: () => Promise<Record<string, number>> }>;
 
-const SCHEDULE_TYPE = "schedule:";
-
 const globalForJobs = globalThis as unknown as {
   __vaultdropSchedules?: WeakSet<Jobs>;
   __vaultdropWorker?: Promise<unknown>;
@@ -88,7 +86,7 @@ export async function runJobs(
   await queue.runOnce({ budgetMs: options.budgetMs ?? 50_000 });
   const results: Record<string, JobResult> = {};
   for (const name of run) {
-    const [latest] = await queue.list({ type: `${SCHEDULE_TYPE}${name}`, limit: 1 });
+    const [latest] = await queue.list({ schedule: name, limit: 1 });
     results[name] = toResult(latest);
   }
   return results;
@@ -119,13 +117,10 @@ export async function jobHealth(): Promise<JobHealth[]> {
 /** The latest runs, newest first. A retried run is one row; `attempt` counts its tries. */
 export async function recentJobRuns(limit = 50) {
   const queue = await jobs();
-  const runs = await queue.list({
-    type: (await schedules(queue)).map((s) => `${SCHEDULE_TYPE}${s.name}`),
-    limit,
-  });
+  const runs = await queue.list({ schedule: (await schedules(queue)).map((s) => s.name), limit });
   return runs.map((run) => ({
     id: run.id,
-    job: run.type.slice(SCHEDULE_TYPE.length),
+    job: run.schedule ?? run.type,
     status: run.status,
     attempt: run.attempts,
     startedAt: run.startedAt ?? run.createdAt,
