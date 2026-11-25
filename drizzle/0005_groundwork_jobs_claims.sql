@@ -1,0 +1,1 @@
+ALTER TABLE "gw_jobs" ADD COLUMN "claims" integer DEFAULT 0 NOT NULL;
